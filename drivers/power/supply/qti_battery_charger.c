@@ -8729,6 +8729,113 @@ static ssize_t handle_stop_charging_store(struct class *c,
 }
 static CLASS_ATTR_RW(handle_stop_charging);
 
+static ssize_t bypass_charging_show(struct class *c,
+				struct class_attribute *attr, char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_XM];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, XM_PROP_HANDLE_STOP_CHARGING);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[XM_PROP_HANDLE_STOP_CHARGING]);
+}
+
+static ssize_t bypass_charging_store(struct class *c,
+				struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev =
+		container_of(c, struct battery_chg_dev, battery_class);
+	int rc;
+	bool val;
+
+	if (kstrtobool(buf, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_XM],
+			       XM_PROP_HANDLE_STOP_CHARGING, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+static CLASS_ATTR_RW(bypass_charging);
+
+static ssize_t bypass_charge_show(struct class *c,
+				struct class_attribute *attr, char *buf)
+{
+	return bypass_charging_show(c, attr, buf);
+}
+
+static ssize_t bypass_charge_store(struct class *c,
+				struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	return bypass_charging_store(c, attr, buf, count);
+}
+static CLASS_ATTR_RW(bypass_charge);
+
+static ssize_t charging_limit_show(struct class *c,
+				struct class_attribute *attr, char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+
+	if (!bcdev->restrict_chg_en)
+		return scnprintf(buf, PAGE_SIZE, "0\n");
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", bcdev->restrict_fcc_ua / 1000);
+}
+
+static ssize_t charging_limit_store(struct class *c,
+				struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev =
+		container_of(c, struct battery_chg_dev, battery_class);
+	int rc;
+	u32 limit_ma;
+
+	if (kstrtou32(buf, 10, &limit_ma))
+		return -EINVAL;
+
+	if (limit_ma) {
+		if (limit_ma * 1000 > bcdev->thermal_fcc_ua)
+			return -EINVAL;
+
+		bcdev->restrict_fcc_ua = limit_ma * 1000;
+		bcdev->restrict_chg_en = true;
+	} else {
+		bcdev->restrict_chg_en = false;
+	}
+
+	rc = __battery_psy_set_charge_current(bcdev, bcdev->restrict_chg_en ?
+			bcdev->restrict_fcc_ua : bcdev->thermal_fcc_ua);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+static CLASS_ATTR_RW(charging_limit);
+
+static ssize_t limit_charging_show(struct class *c,
+				struct class_attribute *attr, char *buf)
+{
+	return charging_limit_show(c, attr, buf);
+}
+
+static ssize_t limit_charging_store(struct class *c,
+				struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	return charging_limit_store(c, attr, buf, count);
+}
+static CLASS_ATTR_RW(limit_charging);
+
 static ssize_t thermal_board_temp_store(struct class *c,
 					struct class_attribute *attr,
 					const char *buf, size_t count)
@@ -10217,6 +10324,10 @@ static struct attribute *battery_class_attrs[] = {
 	&class_attr_over_vol_duration.attr,
 	&class_attr_handle_state.attr,
 	&class_attr_handle_stop_charging.attr,
+	&class_attr_bypass_charging.attr,
+	&class_attr_bypass_charge.attr,
+	&class_attr_charging_limit.attr,
+	&class_attr_limit_charging.attr,
 	&class_attr_dod_count.attr,
 	&class_attr_dod_countLT.attr,
 #if defined(CONFIG_MI_SC760X)
