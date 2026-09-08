@@ -2074,3 +2074,8 @@ static void __exit adios_exit(void) {
 
 module_init(adios_init);
 module_exit(adios_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Adaptive Deadline I/O Scheduler (ADIOS)");
+MODULE_AUTHOR("Masahito Suzuki");
+MODULE_AUTHOR("hoshikv");
