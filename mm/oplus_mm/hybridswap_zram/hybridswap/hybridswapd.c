@@ -116,10 +116,11 @@ atomic_long_t fault_out_pause_cnt = ATOMIC_LONG_INIT(0);
 static atomic_t display_off = ATOMIC_LONG_INIT(0);
 
 
+#if IS_ENABLED(CONFIG_DRM_PANEL_NOTIFY) || IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER)
+static void *g_panel_cookie;
+#endif
 #if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
 static struct notifier_block fb_notif;
-#elif IS_ENABLED(CONFIG_DRM_PANEL_NOTIFY) || IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER)
-static void *g_panel_cookie;
 #endif
 
 
