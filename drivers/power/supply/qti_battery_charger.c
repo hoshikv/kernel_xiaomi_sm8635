@@ -10381,7 +10381,11 @@ static struct attribute *battery_class_usb_2_attrs[] = {
 	&class_attr_usb_2_typec_compliant.attr,
 	&class_attr_charge_control_en.attr,
 	&class_attr_fastcharge_enable.attr,
-	NULL,
+		&class_attr_bypass_charging.attr,
+	&class_attr_bypass_charge.attr,
+	&class_attr_charging_limit.attr,
+	&class_attr_limit_charging.attr,
+NULL,
 };
 ATTRIBUTE_GROUPS(battery_class_usb_2);
 
@@ -10398,7 +10402,11 @@ static struct attribute *battery_class_no_wls_attrs[] = {
 	&class_attr_usb_typec_compliant.attr,
 	&class_attr_usb_num_ports.attr,
 	&class_attr_charge_control_en.attr,
-	NULL,
+		&class_attr_bypass_charging.attr,
+	&class_attr_bypass_charge.attr,
+	&class_attr_charging_limit.attr,
+	&class_attr_limit_charging.attr,
+NULL,
 };
 ATTRIBUTE_GROUPS(battery_class_no_wls);
 
@@ -10419,7 +10427,11 @@ static struct attribute *battery_class_usb_2_no_wls_attrs[] = {
 	&class_attr_usb_num_ports.attr,
 	&class_attr_usb_2_typec_compliant.attr,
 	&class_attr_charge_control_en.attr,
-	NULL,
+		&class_attr_bypass_charging.attr,
+	&class_attr_bypass_charge.attr,
+	&class_attr_charging_limit.attr,
+	&class_attr_limit_charging.attr,
+NULL,
 };
 ATTRIBUTE_GROUPS(battery_class_usb_2_no_wls);
 
