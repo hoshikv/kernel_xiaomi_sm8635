@@ -1884,6 +1884,15 @@ static void xm_batt_update_work(struct work_struct *work)
 				bcdev->limit_reached = false;
 		}
 	}
+
+	if (bcdev->bypass_chg_en) {
+		int rc2 = read_property_id(bcdev, batt_pst, BATT_CHG_CTRL_LIM);
+		if (rc2 < 0 || batt_pst->prop[BATT_CHG_CTRL_LIM] != 0) {
+			rc2 = __battery_psy_set_charge_current(bcdev, 0);
+			if (rc2 < 0)
+				pr_err("Failed to re-apply bypass FCC 0, rc=%d\n", rc2);
+		}
+	}
 	rc = read_property_id(bcdev, pst, XM_PROP_THERMAL_TEMP);
 	if (bcdev->blank_state)
 		interval = BATT_UPDATE_PERIOD_20S;
@@ -3106,8 +3115,6 @@ static int battery_psy_get_prop(struct power_supply *psy,
 			if (check_batt_capacity_whether_glink_timeout(psy))
 				pval->intval = bcdev->last_capacity;
 		}
-		if (bcdev->limit_reached)
-			pval->intval = 100;
 		if (bcdev->fake_soc >= 0 && bcdev->fake_soc <= 100)
 			pval->intval = bcdev->fake_soc;
 		break;
@@ -3124,8 +3131,6 @@ static int battery_psy_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_STATUS:
 		pval->intval = pst->prop[prop_id];
-		if (bcdev->limit_reached)
-			pval->intval = POWER_SUPPLY_STATUS_FULL;
 		if ((pval->intval == POWER_SUPPLY_STATUS_CHARGING && bcdev->report_power_absent)
                     || bcdev->glink_crash_count > 3)
 			pval->intval = POWER_SUPPLY_STATUS_DISCHARGING;
@@ -8779,10 +8784,15 @@ static ssize_t bypass_charging_store(struct class *c,
 	if (kstrtobool(buf, &val))
 		return -EINVAL;
 
-	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_XM],
-			       XM_PROP_INPUT_SUSPEND, val);
-	if (rc < 0)
-		return rc;
+	if (val) {
+		rc = __battery_psy_set_charge_current(bcdev, 0);
+		if (rc < 0)
+			return rc;
+	} else {
+		rc = __battery_psy_set_charge_current(bcdev, bcdev->thermal_fcc_ua);
+		if (rc < 0)
+			return rc;
+	}
 
 	bcdev->bypass_chg_en = val;
 	return count;
