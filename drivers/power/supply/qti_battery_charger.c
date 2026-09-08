@@ -1850,6 +1850,8 @@ static void usb_chg_lpd_check_work(struct work_struct *work)
 #define BATT_UPDATE_PERIOD_20S		20
 #define BATT_UPDATE_PERIOD_8S		  8
 #define BATT_UPDATE_PERIOD_5S		  5
+static int __battery_psy_set_charge_current(struct battery_chg_dev *bcdev,
+					u32 fcc_ua);
 static void xm_batt_update_work(struct work_struct *work)
 {
 	struct battery_chg_dev *bcdev = container_of(work, struct battery_chg_dev, batt_update_work.work);
@@ -5205,7 +5207,26 @@ static ssize_t smart_sic_mode_show(struct class *c,
 	return scnprintf(buf, PAGE_SIZE, "%u\n", pst->prop[XM_PROP_SMART_SIC_MODE]);
 }
 
-static CLASS_ATTR_RO(smart_sic_mode);
+static ssize_t smart_sic_mode_store(struct class *c,
+					struct class_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	int rc;
+	int val;
+
+	if (kstrtoint(buf, 10, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_XM],
+			       XM_PROP_SMART_SIC_MODE, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+static CLASS_ATTR_RW(smart_sic_mode);
 
 static ssize_t charger_user_value_map_store(struct class *c,
 					struct class_attribute *attr,
@@ -9035,7 +9056,27 @@ static ssize_t sc760x_chip_ok_show(struct class *c,
 
 	return scnprintf(buf, PAGE_SIZE, "%u\n", pst->prop[XM_PROP_SC760X_CHIP_OK]);
 }
-static CLASS_ATTR_RO(sc760x_chip_ok);
+
+static ssize_t sc760x_chip_ok_store(struct class *c,
+					struct class_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	int rc;
+	int val;
+
+	if (kstrtoint(buf, 10, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_XM],
+			       XM_PROP_SC760X_CHIP_OK, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+static CLASS_ATTR_RW(sc760x_chip_ok);
 
 static ssize_t sc760x_slave_chip_ok_show(struct class *c,
 		struct class_attribute *attr, char *buf)
