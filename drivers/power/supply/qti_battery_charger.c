@@ -841,6 +841,10 @@ struct battery_chg_dev {
 	u32				usb_icl_ua[NUM_USB_PORTS];
 	u32				thermal_fcc_step;
 	bool				restrict_chg_en;
+	bool				bypass_chg_en;
+	bool				limit_chg_en;
+	u32				limit_pct;
+	bool				limit_reached;
 	u8				chg_ctrl_start_thr;
 	u8				chg_ctrl_end_thr;
 	u8				glink_crash_count;
@@ -1859,6 +1863,27 @@ static void xm_batt_update_work(struct work_struct *work)
 	rc = read_property_id(bcdev, batt_pst, BATT_CAPACITY);
 	if ((batt_pst->prop[BATT_CAPACITY] / 100) < 15)
 		interval = BATT_UPDATE_PERIOD_8S;
+
+	if (bcdev->limit_chg_en) {
+		u32 soc = batt_pst->prop[BATT_CAPACITY] / 100;
+		bool reached = (soc >= bcdev->limit_pct);
+		bool resume = !reached && (bcdev->limit_pct > 2) &&
+				(soc <= bcdev->limit_pct - 2);
+
+		if (reached && !bcdev->limit_reached) {
+			int rc2 = write_property_id(bcdev, pst, XM_PROP_INPUT_SUSPEND, 1);
+			if (rc2 < 0)
+				pr_err("Failed to suspend input at limit, rc=%d\n", rc2);
+			else
+				bcdev->limit_reached = true;
+		} else if (resume && bcdev->limit_reached) {
+			int rc2 = write_property_id(bcdev, pst, XM_PROP_INPUT_SUSPEND, 0);
+			if (rc2 < 0)
+				pr_err("Failed to resume input after limit, rc=%d\n", rc2);
+			else
+				bcdev->limit_reached = false;
+		}
+	}
 	rc = read_property_id(bcdev, pst, XM_PROP_THERMAL_TEMP);
 	if (bcdev->blank_state)
 		interval = BATT_UPDATE_PERIOD_20S;
@@ -3081,6 +3106,8 @@ static int battery_psy_get_prop(struct power_supply *psy,
 			if (check_batt_capacity_whether_glink_timeout(psy))
 				pval->intval = bcdev->last_capacity;
 		}
+		if (bcdev->limit_reached)
+			pval->intval = 100;
 		if (bcdev->fake_soc >= 0 && bcdev->fake_soc <= 100)
 			pval->intval = bcdev->fake_soc;
 		break;
@@ -3097,6 +3124,8 @@ static int battery_psy_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_STATUS:
 		pval->intval = pst->prop[prop_id];
+		if (bcdev->limit_reached)
+			pval->intval = POWER_SUPPLY_STATUS_FULL;
 		if ((pval->intval == POWER_SUPPLY_STATUS_CHARGING && bcdev->report_power_absent)
                     || bcdev->glink_crash_count > 3)
 			pval->intval = POWER_SUPPLY_STATUS_DISCHARGING;
@@ -8734,14 +8763,8 @@ static ssize_t bypass_charging_show(struct class *c,
 {
 	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
 						battery_class);
-	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_XM];
-	int rc;
 
-	rc = read_property_id(bcdev, pst, XM_PROP_HANDLE_STOP_CHARGING);
-	if (rc < 0)
-		return rc;
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[XM_PROP_HANDLE_STOP_CHARGING]);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", bcdev->bypass_chg_en);
 }
 
 static ssize_t bypass_charging_store(struct class *c,
@@ -8757,10 +8780,11 @@ static ssize_t bypass_charging_store(struct class *c,
 		return -EINVAL;
 
 	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_XM],
-			       XM_PROP_HANDLE_STOP_CHARGING, val);
+			       XM_PROP_INPUT_SUSPEND, val);
 	if (rc < 0)
 		return rc;
 
+	bcdev->bypass_chg_en = val;
 	return count;
 }
 static CLASS_ATTR_RW(bypass_charging);
@@ -8785,10 +8809,10 @@ static ssize_t charging_limit_show(struct class *c,
 	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
 						battery_class);
 
-	if (!bcdev->restrict_chg_en)
+	if (!bcdev->limit_chg_en)
 		return scnprintf(buf, PAGE_SIZE, "0\n");
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n", bcdev->restrict_fcc_ua / 1000);
+	return scnprintf(buf, PAGE_SIZE, "%u\n", bcdev->limit_pct);
 }
 
 static ssize_t charging_limit_store(struct class *c,
@@ -8798,26 +8822,28 @@ static ssize_t charging_limit_store(struct class *c,
 	struct battery_chg_dev *bcdev =
 		container_of(c, struct battery_chg_dev, battery_class);
 	int rc;
-	u32 limit_ma;
+	u32 pct;
 
-	if (kstrtou32(buf, 10, &limit_ma))
+	if (kstrtou32(buf, 10, &pct) || pct > 100)
 		return -EINVAL;
 
-	if (limit_ma) {
-		if (limit_ma * 1000 > bcdev->thermal_fcc_ua)
-			return -EINVAL;
-
-		bcdev->restrict_fcc_ua = limit_ma * 1000;
-		bcdev->restrict_chg_en = true;
-	} else {
-		bcdev->restrict_chg_en = false;
+	if (!pct) {
+		bcdev->limit_chg_en = false;
+		bcdev->limit_pct = 0;
+		bcdev->limit_reached = false;
+		rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_XM],
+				       XM_PROP_INPUT_SUSPEND, 0);
+		if (rc < 0)
+			return rc;
+		goto out;
 	}
 
-	rc = __battery_psy_set_charge_current(bcdev, bcdev->restrict_chg_en ?
-			bcdev->restrict_fcc_ua : bcdev->thermal_fcc_ua);
-	if (rc < 0)
-		return rc;
+	bcdev->limit_chg_en = true;
+	bcdev->limit_pct = pct;
 
+out:
+	if (bcdev->psy_list[PSY_TYPE_BATTERY].psy)
+		power_supply_changed(bcdev->psy_list[PSY_TYPE_BATTERY].psy);
 	return count;
 }
 static CLASS_ATTR_RW(charging_limit);
@@ -10381,11 +10407,7 @@ static struct attribute *battery_class_usb_2_attrs[] = {
 	&class_attr_usb_2_typec_compliant.attr,
 	&class_attr_charge_control_en.attr,
 	&class_attr_fastcharge_enable.attr,
-		&class_attr_bypass_charging.attr,
-	&class_attr_bypass_charge.attr,
-	&class_attr_charging_limit.attr,
-	&class_attr_limit_charging.attr,
-NULL,
+	NULL,
 };
 ATTRIBUTE_GROUPS(battery_class_usb_2);
 
@@ -10402,11 +10424,7 @@ static struct attribute *battery_class_no_wls_attrs[] = {
 	&class_attr_usb_typec_compliant.attr,
 	&class_attr_usb_num_ports.attr,
 	&class_attr_charge_control_en.attr,
-		&class_attr_bypass_charging.attr,
-	&class_attr_bypass_charge.attr,
-	&class_attr_charging_limit.attr,
-	&class_attr_limit_charging.attr,
-NULL,
+	NULL,
 };
 ATTRIBUTE_GROUPS(battery_class_no_wls);
 
@@ -10427,11 +10445,7 @@ static struct attribute *battery_class_usb_2_no_wls_attrs[] = {
 	&class_attr_usb_num_ports.attr,
 	&class_attr_usb_2_typec_compliant.attr,
 	&class_attr_charge_control_en.attr,
-		&class_attr_bypass_charging.attr,
-	&class_attr_bypass_charge.attr,
-	&class_attr_charging_limit.attr,
-	&class_attr_limit_charging.attr,
-NULL,
+	NULL,
 };
 ATTRIBUTE_GROUPS(battery_class_usb_2_no_wls);
 
