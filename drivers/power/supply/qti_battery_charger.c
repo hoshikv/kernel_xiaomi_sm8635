@@ -841,7 +841,6 @@ struct battery_chg_dev {
 	u32				usb_icl_ua[NUM_USB_PORTS];
 	u32				thermal_fcc_step;
 	bool				restrict_chg_en;
-	bool				bypass_chg_en;
 	bool				limit_chg_en;
 	u32				limit_pct;
 	bool				limit_reached;
@@ -1887,14 +1886,6 @@ static void xm_batt_update_work(struct work_struct *work)
 		}
 	}
 
-	if (bcdev->bypass_chg_en) {
-		int rc2 = read_property_id(bcdev, batt_pst, BATT_CHG_CTRL_LIM);
-		if (rc2 < 0 || batt_pst->prop[BATT_CHG_CTRL_LIM] != 0) {
-			rc2 = __battery_psy_set_charge_current(bcdev, 0);
-			if (rc2 < 0)
-				pr_err("Failed to re-apply bypass FCC 0, rc=%d\n", rc2);
-		}
-	}
 	rc = read_property_id(bcdev, pst, XM_PROP_THERMAL_TEMP);
 	if (bcdev->blank_state)
 		interval = BATT_UPDATE_PERIOD_20S;
@@ -8784,56 +8775,6 @@ static ssize_t handle_stop_charging_store(struct class *c,
 }
 static CLASS_ATTR_RW(handle_stop_charging);
 
-static ssize_t bypass_charging_show(struct class *c,
-				struct class_attribute *attr, char *buf)
-{
-	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
-						battery_class);
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n", bcdev->bypass_chg_en);
-}
-
-static ssize_t bypass_charging_store(struct class *c,
-				struct class_attribute *attr,
-				const char *buf, size_t count)
-{
-	struct battery_chg_dev *bcdev =
-		container_of(c, struct battery_chg_dev, battery_class);
-	int rc;
-	bool val;
-
-	if (kstrtobool(buf, &val))
-		return -EINVAL;
-
-	if (val) {
-		rc = __battery_psy_set_charge_current(bcdev, 0);
-		if (rc < 0)
-			return rc;
-	} else {
-		rc = __battery_psy_set_charge_current(bcdev, bcdev->thermal_fcc_ua);
-		if (rc < 0)
-			return rc;
-	}
-
-	bcdev->bypass_chg_en = val;
-	return count;
-}
-static CLASS_ATTR_RW(bypass_charging);
-
-static ssize_t bypass_charge_show(struct class *c,
-				struct class_attribute *attr, char *buf)
-{
-	return bypass_charging_show(c, attr, buf);
-}
-
-static ssize_t bypass_charge_store(struct class *c,
-				struct class_attribute *attr,
-				const char *buf, size_t count)
-{
-	return bypass_charging_store(c, attr, buf, count);
-}
-static CLASS_ATTR_RW(bypass_charge);
-
 static ssize_t charging_limit_show(struct class *c,
 				struct class_attribute *attr, char *buf)
 {
@@ -10401,8 +10342,6 @@ static struct attribute *battery_class_attrs[] = {
 	&class_attr_over_vol_duration.attr,
 	&class_attr_handle_state.attr,
 	&class_attr_handle_stop_charging.attr,
-	&class_attr_bypass_charging.attr,
-	&class_attr_bypass_charge.attr,
 	&class_attr_charging_limit.attr,
 	&class_attr_limit_charging.attr,
 	&class_attr_dod_count.attr,
