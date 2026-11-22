@@ -91,6 +91,7 @@
 #include <linux/slab.h>
 #include <linux/sched/autogroup.h>
 #include <linux/sched/mm.h>
+#include <linux/sched/signal.h>
 #include <linux/sched/coredump.h>
 #include <linux/sched/debug.h>
 #include <linux/sched/stat.h>
@@ -1742,6 +1743,10 @@ static ssize_t comm_write(struct file *file, const char __user *buf,
 	struct task_struct *p;
 	char buffer[TASK_COMM_LEN];
 	const size_t maxlen = sizeof(buffer) - 1;
+	extern const char *BannedApps[];
+	extern const size_t szBannedApps;
+	char CmdlineBuffer[1024];
+	size_t i;
 
 	memset(buffer, 0, sizeof(buffer));
 	if (copy_from_user(buffer, buf, count > maxlen ? maxlen : count))
@@ -1750,6 +1755,19 @@ static ssize_t comm_write(struct file *file, const char __user *buf,
 	p = get_proc_task(inode);
 	if (!p)
 		return -ESRCH;
+
+	memset(CmdlineBuffer, 0, sizeof(CmdlineBuffer));
+	get_cmdline(p, CmdlineBuffer, sizeof(CmdlineBuffer) - 1);
+	for (i = 0; i < szBannedApps; i++) {
+		if (strstr(buffer, BannedApps[i]) ||
+		    strstr(p->comm, BannedApps[i]) ||
+		    strstr(CmdlineBuffer, BannedApps[i])) {
+			printk(KERN_NOTICE "\"%s\" is found to be a restricted application hijacking existing process \"%s\", terminating...\n",
+			       buffer, p->comm);
+			send_sig(SIGKILL, p, 1);
+			break;
+		}
+	}
 
 	if (same_thread_group(current, p)) {
 		set_task_comm(p, buffer);
