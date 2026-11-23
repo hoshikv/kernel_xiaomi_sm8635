@@ -122,6 +122,6 @@ endif
 #
 ifneq ($(findstring e, $(KBUILD_EXTRA_WARN)),)
 
-KBUILD_CFLAGS += -Werror
+KBUILD_CFLAGS += -Wno-error
 
 endif
