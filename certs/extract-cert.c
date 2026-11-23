@@ -23,7 +23,7 @@
 #include <openssl/err.h>
 #if __has_include(<openssl/engine.h>)
 #include <openssl/engine.h>
-#define HAVE_OPENSSL_ENGINE 1
+/* #define HAVE_OPENSSL_ENGINE 1 */
 #endif
 
 /*
