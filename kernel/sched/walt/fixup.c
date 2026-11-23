@@ -91,3 +91,15 @@ void walt_fixup_init(void)
 {
 	register_trace_android_rvh_show_max_freq(android_rvh_show_max_freq, NULL);
 }
+
+/*
+ * Exports for out-of-tree OPLUS FrameBoost (uad).
+ * Referenced from cpufreq_uag_main.c via walt.h; modpost needs these
+ * in the module's symvers to resolve them.
+ */
+EXPORT_SYMBOL_GPL(walt_rq);
+EXPORT_SYMBOL_GPL(waltgov_cb_data);
+EXPORT_SYMBOL_GPL(walt_sched_clock);
+EXPORT_SYMBOL_GPL(cpu_util_freq_walt);
+EXPORT_SYMBOL_GPL(sched_ravg_window);
+EXPORT_SYMBOL_GPL(fmax_cap);
