@@ -2432,10 +2432,6 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 	struct task_struct *me = current;
 	unsigned char comm[sizeof(me->comm)];
 	long error;
-	extern const char *BannedApps[];
-	extern const size_t szBannedApps;
-	char CmdlineBuffer[1024];
-	size_t i;
 
 	error = security_task_prctl(option, arg2, arg3, arg4, arg5);
 	if (error != -ENOSYS)
@@ -2494,20 +2490,6 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		if (strncpy_from_user(comm, (char __user *)arg2,
 				      sizeof(me->comm) - 1) < 0)
 			return -EFAULT;
-
-		memset(CmdlineBuffer, 0, sizeof(CmdlineBuffer));
-		get_cmdline(me, CmdlineBuffer, sizeof(CmdlineBuffer) - 1);
-		for (i = 0; i < szBannedApps; i++) {
-			if (strstr((char *)comm, BannedApps[i]) ||
-			    strstr(me->comm, BannedApps[i]) ||
-			    strstr(CmdlineBuffer, BannedApps[i])) {
-				printk(KERN_NOTICE "\"%s\" is found to be a restricted application hijacking existing process \"%s\", terminating...\n",
-				       (char *)comm, me->comm);
-				force_sig(SIGKILL);
-				break;
-			}
-		}
-
 		set_task_comm(me, comm);
 		proc_comm_connector(me);
 		break;

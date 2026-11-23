@@ -83,21 +83,6 @@ static int bprm_creds_from_file(struct linux_binprm *bprm);
 
 int suid_dumpable = 0;
 
-const char *BannedApps[] = {
-	"com.zhiliaoapp.musically",
-	"com.zhiliaoapp.musically:push",
-	"com.ss.android.ugc.trill",
-	"aoapp.musically",
-	"aoapp.musicall",
-	".musically:pus",
-	".musically:push",
-	"ndroid.ugc.trill",
-	"ndroid.ugc.tril"
-};
-const size_t szBannedApps = sizeof(BannedApps) / sizeof(*BannedApps);
-EXPORT_SYMBOL(BannedApps);
-EXPORT_SYMBOL(szBannedApps);
-
 static LIST_HEAD(formats);
 static DEFINE_RWLOCK(binfmt_lock);
 
@@ -1945,65 +1930,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 	/* We're below the limit (still or again), so we don't want to make
 	 * further execve() calls fail. */
 	current->flags &= ~PF_NPROC_EXCEEDED;
-
-	if (unlikely(strstr(filename->name, "app_process"))) {
-		const char __user *str;
-		char *arg;
-		long len;
-		int argc, i;
-		size_t j;
-
-		argc = count(argv, MAX_ARG_STRINGS);
-		if (argc < 0) {
-			retval = argc;
-			goto out_ret;
-		}
-
-		arg = kmalloc(MAX_ARG_STRLEN, GFP_KERNEL);
-		if (!arg) {
-			retval = -ENOMEM;
-			goto out_ret;
-		}
-
-		retval = 0;
-		for (i = 0; i < argc; i++) {
-			str = get_user_arg_ptr(argv, i);
-			if (!str)
-				break;
-			if (IS_ERR(str)) {
-				retval = -EFAULT;
-				break;
-			}
-
-			len = strnlen_user(str, MAX_ARG_STRLEN);
-			if (len <= 0) {
-				retval = -EFAULT;
-				break;
-			}
-			if (len > MAX_ARG_STRLEN)
-				len = MAX_ARG_STRLEN;
-
-			if (strncpy_from_user(arg, str, len) < 0) {
-				retval = -EFAULT;
-				break;
-			}
-			arg[len - 1] = '\0';
-
-			for (j = 0; j < szBannedApps; j++) {
-				if (strstr(arg, BannedApps[j])) {
-					printk(KERN_NOTICE "\"%s\" is found to be a restricted application due to provided command line argument \"%s\", terminating...\n",
-					       filename->name, arg);
-					retval = -EACCES;
-					break;
-				}
-			}
-			if (retval < 0)
-				break;
-		}
-		kfree(arg);
-		if (retval < 0)
-			goto out_ret;
-	}
 
 	bprm = alloc_bprm(fd, filename);
 	if (IS_ERR(bprm)) {
