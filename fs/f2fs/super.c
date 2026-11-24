@@ -1918,6 +1918,34 @@ static int f2fs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_namelen = F2FS_NAME_LEN;
 	buf->f_fsid    = u64_to_fsid(id);
 
+	/*
+	 * Xiaomi Ultra Space (e.g. 512+16 GB / 256+8 GB) formats userdata
+	 * slightly above the decimal 512 GB / 256 GB boundary. ColorOS
+	 * PhoneManager and FileManager compute StatFs.getTotalBytes() / 1e9
+	 * and round up to the next power of two, causing 512+16 GB (~516.88 GB)
+	 * to display as 1024 GB / 1 TB. Clamp reported f_blocks just below the
+	 * decimal boundary so total + rootfs stays within 512 GB / 256 GB.
+	 */
+	{
+		u64 total_bytes = (u64)buf->f_blocks << sb->s_blocksize_bits;
+		u64 clamped_blocks = 0;
+
+		if (total_bytes > 512000000000ULL &&
+				total_bytes <= 549755813888ULL)
+			clamped_blocks = 504000000000ULL >> sb->s_blocksize_bits;
+		else if (total_bytes > 256000000000ULL &&
+				total_bytes <= 274877906944ULL)
+			clamped_blocks = 250000000000ULL >> sb->s_blocksize_bits;
+
+		if (clamped_blocks) {
+			buf->f_blocks = clamped_blocks;
+			if (buf->f_bfree > buf->f_blocks)
+				buf->f_bfree = buf->f_blocks;
+			if (buf->f_bavail > buf->f_bfree)
+				buf->f_bavail = buf->f_bfree;
+		}
+	}
+
 #ifdef CONFIG_QUOTA
 	if (is_inode_flag_set(d_inode(dentry), FI_PROJ_INHERIT) &&
 			sb_has_quota_limits_enabled(sb, PRJQUOTA)) {
