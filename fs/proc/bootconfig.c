@@ -22,23 +22,57 @@ static int boot_config_proc_show(struct seq_file *m, void *v)
 /* Rest size of buffer */
 #define rest(dst, end) ((end) > (dst) ? (end) - (dst) : 0)
 
+struct bootconfig_spoof_entry {
+	const char *key;
+	const char *val;
+};
+
+static const struct bootconfig_spoof_entry bc_spoof_entries[] = {
+	{ "androidboot.verifiedbootstate", "green" },
+	{ "androidboot.vbmeta.device_state", "locked" },
+	{ "androidboot.vbmeta.avb_version", "1.2" },
+	{ "androidboot.flash.locked", "1" },
+	{ "androidboot.veritymode", "enforcing" },
+	{ "androidboot.veritymode.managed", "yes" },
+	{ "androidboot.warranty_bit", "0" },
+	{ "androidboot.selinux", "enforcing" },
+};
+
 /* Return the needed total length if @size is 0 */
 static int __init copy_xbc_key_value_list(char *dst, size_t size)
 {
+	bool seen[ARRAY_SIZE(bc_spoof_entries)] = { false };
 	struct xbc_node *leaf, *vnode;
 	char *key, *end = dst + size;
 	const char *val;
 	char q;
-	int ret = 0;
+	int ret = 0, i;
 
 	key = kzalloc(XBC_KEYLEN_MAX, GFP_KERNEL);
 	if (!key)
 		return -ENOMEM;
 
 	xbc_for_each_key_value(leaf, val) {
+		int matched = -1;
+
 		ret = xbc_node_compose_key(leaf, key, XBC_KEYLEN_MAX);
 		if (ret < 0)
 			break;
+		for (i = 0; i < ARRAY_SIZE(bc_spoof_entries); i++) {
+			if (!strcmp(key, bc_spoof_entries[i].key)) {
+				matched = i;
+				break;
+			}
+		}
+		if (matched >= 0) {
+			seen[matched] = true;
+			ret = snprintf(dst, rest(dst, end), "%s = \"%s\"\n",
+				       key, bc_spoof_entries[matched].val);
+			if (ret < 0)
+				goto out;
+			dst += ret;
+			continue;
+		}
 		ret = snprintf(dst, rest(dst, end), "%s = ", key);
 		if (ret < 0)
 			break;
@@ -58,6 +92,18 @@ static int __init copy_xbc_key_value_list(char *dst, size_t size)
 			}
 		} else {
 			ret = snprintf(dst, rest(dst, end), "\"\"\n");
+			if (ret < 0)
+				break;
+			dst += ret;
+		}
+	}
+	if (ret >= 0) {
+		for (i = 0; i < ARRAY_SIZE(bc_spoof_entries); i++) {
+			if (seen[i])
+				continue;
+			ret = snprintf(dst, rest(dst, end), "%s = \"%s\"\n",
+				       bc_spoof_entries[i].key,
+				       bc_spoof_entries[i].val);
 			if (ret < 0)
 				break;
 			dst += ret;
