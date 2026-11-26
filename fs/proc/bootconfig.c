@@ -8,14 +8,18 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/bootconfig.h>
+#include <linux/sched/signal.h>
 #include <linux/slab.h>
 
 static char *saved_boot_config;
+static char *saved_boot_config_init;
 
 static int boot_config_proc_show(struct seq_file *m, void *v)
 {
-	if (saved_boot_config)
-		seq_puts(m, saved_boot_config);
+	const char *out = is_global_init(current) ? saved_boot_config_init : saved_boot_config;
+
+	if (out)
+		seq_puts(m, out);
 	return 0;
 }
 
@@ -25,21 +29,22 @@ static int boot_config_proc_show(struct seq_file *m, void *v)
 struct bootconfig_spoof_entry {
 	const char *key;
 	const char *val;
+	bool safe_for_init;
 };
 
 static const struct bootconfig_spoof_entry bc_spoof_entries[] = {
-	{ "androidboot.verifiedbootstate", "green" },
-	{ "androidboot.vbmeta.device_state", "locked" },
-	{ "androidboot.vbmeta.avb_version", "1.2" },
-	{ "androidboot.flash.locked", "1" },
-	{ "androidboot.veritymode", "enforcing" },
-	{ "androidboot.veritymode.managed", "yes" },
-	{ "androidboot.warranty_bit", "0" },
-	{ "androidboot.selinux", "enforcing" },
+	{ "androidboot.verifiedbootstate", "green", true },
+	{ "androidboot.vbmeta.avb_version", "1.2", true },
+	{ "androidboot.flash.locked", "1", true },
+	{ "androidboot.veritymode.managed", "yes", true },
+	{ "androidboot.warranty_bit", "0", true },
+	{ "androidboot.vbmeta.device_state", "locked", false },
+	{ "androidboot.veritymode", "enforcing", false },
+	{ "androidboot.selinux", "enforcing", false },
 };
 
 /* Return the needed total length if @size is 0 */
-static int __init copy_xbc_key_value_list(char *dst, size_t size)
+static int __init copy_xbc_key_value_list(char *dst, size_t size, bool init_only)
 {
 	bool seen[ARRAY_SIZE(bc_spoof_entries)] = { false };
 	struct xbc_node *leaf, *vnode;
@@ -59,6 +64,8 @@ static int __init copy_xbc_key_value_list(char *dst, size_t size)
 		if (ret < 0)
 			break;
 		for (i = 0; i < ARRAY_SIZE(bc_spoof_entries); i++) {
+			if (init_only && !bc_spoof_entries[i].safe_for_init)
+				continue;
 			if (!strcmp(key, bc_spoof_entries[i].key)) {
 				matched = i;
 				break;
@@ -99,7 +106,7 @@ static int __init copy_xbc_key_value_list(char *dst, size_t size)
 	}
 	if (ret >= 0) {
 		for (i = 0; i < ARRAY_SIZE(bc_spoof_entries); i++) {
-			if (seen[i])
+			if (seen[i] || (init_only && !bc_spoof_entries[i].safe_for_init))
 				continue;
 			ret = snprintf(dst, rest(dst, end), "%s = \"%s\"\n",
 				       bc_spoof_entries[i].key,
@@ -115,24 +122,40 @@ out:
 	return ret < 0 ? ret : dst - (end - size);
 }
 
-static int __init proc_boot_config_init(void)
+static int __init alloc_boot_config(char **out, bool init_only)
 {
 	int len;
 
-	len = copy_xbc_key_value_list(NULL, 0);
-	if (len < 0)
+	len = copy_xbc_key_value_list(NULL, 0, init_only);
+	if (len <= 0)
 		return len;
 
-	if (len > 0) {
-		saved_boot_config = kzalloc(len + 1, GFP_KERNEL);
-		if (!saved_boot_config)
-			return -ENOMEM;
+	*out = kzalloc(len + 1, GFP_KERNEL);
+	if (!*out)
+		return -ENOMEM;
 
-		len = copy_xbc_key_value_list(saved_boot_config, len + 1);
-		if (len < 0) {
-			kfree(saved_boot_config);
-			return len;
-		}
+	len = copy_xbc_key_value_list(*out, len + 1, init_only);
+	if (len < 0) {
+		kfree(*out);
+		*out = NULL;
+		return len;
+	}
+	return 0;
+}
+
+static int __init proc_boot_config_init(void)
+{
+	int ret;
+
+	ret = alloc_boot_config(&saved_boot_config_init, true);
+	if (ret < 0)
+		return ret;
+
+	ret = alloc_boot_config(&saved_boot_config, false);
+	if (ret < 0) {
+		kfree(saved_boot_config_init);
+		saved_boot_config_init = NULL;
+		return ret;
 	}
 
 	proc_create_single("bootconfig", 0, NULL, boot_config_proc_show);

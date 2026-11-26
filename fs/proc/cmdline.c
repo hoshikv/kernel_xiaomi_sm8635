@@ -2,6 +2,7 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/proc_fs.h>
+#include <linux/sched/signal.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -9,22 +10,24 @@
 struct cmdline_spoof_entry {
 	const char *key;
 	const char *val;
+	bool safe_for_init;
 };
 
 static const struct cmdline_spoof_entry cmdline_spoof_entries[] = {
-	{ "androidboot.verifiedbootstate=", "green" },
-	{ "androidboot.vbmeta.device_state=", "locked" },
-	{ "androidboot.vbmeta.avb_version=", "1.2" },
-	{ "androidboot.flash.locked=", "1" },
-	{ "androidboot.veritymode=", "enforcing" },
-	{ "androidboot.veritymode.managed=", "yes" },
-	{ "androidboot.warranty_bit=", "0" },
-	{ "androidboot.selinux=", "enforcing" },
+	{ "androidboot.verifiedbootstate=", "green", true },
+	{ "androidboot.vbmeta.avb_version=", "1.2", true },
+	{ "androidboot.flash.locked=", "1", true },
+	{ "androidboot.veritymode.managed=", "yes", true },
+	{ "androidboot.warranty_bit=", "0", true },
+	{ "androidboot.vbmeta.device_state=", "locked", false },
+	{ "androidboot.veritymode=", "enforcing", false },
+	{ "androidboot.selinux=", "enforcing", false },
 };
 
 static char *spoofed_command_line;
+static char *spoofed_command_line_init;
 
-static void __init build_spoofed_cmdline(void)
+static char * __init build_spoofed_cmdline(bool init_only)
 {
 	bool seen[ARRAY_SIZE(cmdline_spoof_entries)] = { false };
 	size_t alloc_size, pos = 0;
@@ -33,12 +36,12 @@ static void __init build_spoofed_cmdline(void)
 	int i;
 
 	if (!p)
-		return;
+		return NULL;
 
 	alloc_size = strlen(p) + 512;
 	buf = kzalloc(alloc_size, GFP_KERNEL);
 	if (!buf)
-		return;
+		return NULL;
 
 	while (*p) {
 		const char *tok_start, *tok_end;
@@ -57,8 +60,11 @@ static void __init build_spoofed_cmdline(void)
 		tok_len = tok_end - tok_start;
 
 		for (i = 0; i < ARRAY_SIZE(cmdline_spoof_entries); i++) {
-			size_t klen = strlen(cmdline_spoof_entries[i].key);
+			size_t klen;
 
+			if (init_only && !cmdline_spoof_entries[i].safe_for_init)
+				continue;
+			klen = strlen(cmdline_spoof_entries[i].key);
 			if (tok_len >= klen &&
 			    !strncmp(tok_start, cmdline_spoof_entries[i].key, klen)) {
 				matched = i;
@@ -84,7 +90,7 @@ static void __init build_spoofed_cmdline(void)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(cmdline_spoof_entries); i++) {
-		if (seen[i])
+		if (seen[i] || (init_only && !cmdline_spoof_entries[i].safe_for_init))
 			continue;
 		if (pos > 0 && pos + 1 < alloc_size)
 			buf[pos++] = ' ';
@@ -93,19 +99,27 @@ static void __init build_spoofed_cmdline(void)
 				 cmdline_spoof_entries[i].val);
 	}
 
-	spoofed_command_line = buf;
+	return buf;
 }
 
 static int cmdline_proc_show(struct seq_file *m, void *v)
 {
-	seq_puts(m, spoofed_command_line ? spoofed_command_line : saved_command_line);
+	const char *out;
+
+	if (is_global_init(current))
+		out = spoofed_command_line_init ? spoofed_command_line_init : saved_command_line;
+	else
+		out = spoofed_command_line ? spoofed_command_line : saved_command_line;
+
+	seq_puts(m, out);
 	seq_putc(m, '\n');
 	return 0;
 }
 
 static int __init proc_cmdline_init(void)
 {
-	build_spoofed_cmdline();
+	spoofed_command_line_init = build_spoofed_cmdline(true);
+	spoofed_command_line = build_spoofed_cmdline(false);
 	proc_create_single("cmdline", 0, NULL, cmdline_proc_show);
 	return 0;
 }
